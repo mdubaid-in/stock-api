@@ -2,7 +2,8 @@
   "version": "0.2",
   "ignorePaths": [
     "config/**/*.py",
-    "log/**/*.py"
+    "log/**/*.py",
+    "requirements.txt"
   ],
   "words": [
     "DHAN"
