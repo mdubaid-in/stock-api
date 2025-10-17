@@ -8,7 +8,6 @@ import time
 import signal
 import sys
 from threading import Thread, Event
-from typing import List
 
 from auth.auth import validateApiKey
 from utils.marketHours import (
@@ -37,16 +36,6 @@ else:
     from classes.TwelveDataManager import healthCheck
 
     DATA_SOURCE = "REST API (Polling)"
-
-# Symbols Configuration
-# Define symbols you want to track (Free trial symbols for testing)
-SYMBOLS: List[str] = [
-    "AAPL",  # Apple Inc. (US Stock - Free)
-    "MSFT",  # Microsoft Corporation (US Stock - Free)
-    "GOOGL",  # Alphabet Inc. (US Stock - Free)
-    "AMZN",  # Amazon.com Inc. (US Stock - Free)
-    "TSLA",  # Tesla Inc. (US Stock - Free)
-]
 
 # Global state
 shutdown_event = Event()
@@ -116,13 +105,13 @@ def main():
         sys.exit(1)
 
     # Check initial market status
-    # if not isMarketOpen():
-    #     wait_time = getTimeUntilMarketOpen()
-    #     hours = wait_time // 3600
-    #     minutes = (wait_time % 3600) // 60
-    #     logger.info(f"Market is currently closed")
-    #     logger.info(f"Market opens in {hours}h {minutes}m")
-    #     logger.info("Waiting for market to open...")
+    if not isMarketOpen():
+        wait_time = getTimeUntilMarketOpen()
+        hours = wait_time // 3600
+        minutes = (wait_time % 3600) // 60
+        logger.info(f"Market is currently closed")
+        logger.info(f"Market opens in {hours}h {minutes}m")
+        logger.info("Waiting for market to open...")
 
     # Create instrument manager with configured symbols
     logger.note("Initializing instruments...")

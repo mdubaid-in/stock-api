@@ -24,7 +24,7 @@ class Instrument:
     def getSymbolWithExchange(self) -> str:
         """Get symbol in Twelve Data format (SYMBOL.EXCHANGE)"""
         # Twelve Data uses format like: RELIANCE.NSE or TCS.BSE
-        return f"{self.symbol}"  # Exchange suffix optional for major stocks
+        return f"{self.symbol}:{self.exchange}"  # Exchange suffix optional for major stocks
 
     def __repr__(self) -> str:
         return f"Instrument({self.symbol}, {self.exchange})"
@@ -96,8 +96,20 @@ def fetchInstrumentsFromMongo() -> List[Dict]:
     """
     try:
         stock_master = mongo_client.get_collection("stockMaster")
-        instruments = list(stock_master.find({}))
-        return instruments
+        listings = list(
+            stock_master.find(
+                {},
+                {
+                    "_id": 1,
+                    "crossListings.symbol": 1,
+                    "crossListings.exchange": 1,
+                    "crossListings.name": 1,
+                },
+            )
+        )
+
+        print(listings)
+        return listings
     except Exception as e:
         logger.error(f"Error fetching instruments from MongoDB: {e}")
         return []
@@ -105,7 +117,7 @@ def fetchInstrumentsFromMongo() -> List[Dict]:
 
 def getInstrumentBySymbol(symbol: str) -> Optional[Dict]:
     """
-    Get a specific instrument from MongoDB by symbol
+    Get a specific instrument from MongoDB by symbol (searches in instruments array)
 
     Args:
         symbol: Trading symbol to search for
@@ -115,9 +127,18 @@ def getInstrumentBySymbol(symbol: str) -> Optional[Dict]:
     """
     try:
         stockMasterCollection = mongo_client.get_collection("stockMaster")
-        instrument = stockMasterCollection.find_one({"symbol": symbol})
+
+        # First try to find by instruments array
+        instrument = stockMasterCollection.find_one({"crossListings.symbol": symbol})
+
         if instrument:
             logger.debug(f"Found instrument for symbol: {symbol}")
+            return instrument
+
+        # Fallback to old structure
+        instrument = stockMasterCollection.find_one({"symbol": symbol})
+        if instrument:
+            logger.debug(f"Found instrument for symbol: {symbol} (old structure)")
         else:
             logger.warning(f"No instrument found for symbol: {symbol}")
         return instrument
@@ -126,33 +147,63 @@ def getInstrumentBySymbol(symbol: str) -> Optional[Dict]:
         return None
 
 
-def createInstrumentsForBothExchanges(mongoInstrument: Dict) -> List[Instrument]:
+def getInstrumentByTwelveDataSymbol(twelveDataSymbol: str) -> Optional[Dict]:
     """
-    Create Instrument objects for NSE and BSE based on available exchange IDs
+    Get a specific instrument from MongoDB by Twelve Data symbol
 
     Args:
-        mongoInstrument: Instrument document from MongoDB
+        twelveDataSymbol: Twelve Data symbol to search for
 
     Returns:
-        List of Instrument objects (one for each available exchange)
+        Instrument document if found, None otherwise
+    """
+    try:
+        stockMasterCollection = mongo_client.get_collection("stockMaster")
+
+        # Search by Twelve Data symbol in crossListings array
+        instrument = stockMasterCollection.find_one(
+            {"crossListings.symbol": twelveDataSymbol}
+        )
+
+        if instrument:
+            logger.debug(f"Found instrument for Twelve Data symbol: {twelveDataSymbol}")
+        else:
+            logger.warning(
+                f"No instrument found for Twelve Data symbol: {twelveDataSymbol}"
+            )
+        return instrument
+    except Exception as e:
+        logger.error(
+            f"Error fetching instrument for Twelve Data symbol {twelveDataSymbol}: {e}"
+        )
+        return None
+
+
+def createInstrumentsForBothExchanges(mongoInstrument: Dict) -> List[Instrument]:
+    """
+    Create Instrument objects from the instruments array in MongoDB document
+
+    Args:
+        mongoInstrument: Instrument document from MongoDB with instruments array
+
+    Returns:
+        List of Instrument objects from the instruments array
     """
     instruments = []
-    symbol = mongoInstrument["symbol"]
-    name = mongoInstrument.get("listedName") or mongoInstrument.get("companyName")
 
-    # Add NSE instrument if nseId exists
-    if mongoInstrument.get("nseId"):
-        instruments.append(Instrument(symbol, "NSE", name))
+    # Get instruments array from the document
+    cross_listings = mongoInstrument.get("crossListings", [])
 
-    # Add BSE instrument if bseId exists
-    if mongoInstrument.get("bseId"):
-        bse_id = mongoInstrument.get("bseId")
-        instruments.append(Instrument(bse_id, "XBOM", name))
+    if cross_listings:
+        # Process each instrument in the array
+        for instrument_data in cross_listings:
+            symbol = instrument_data.get("symbol", "")
+            exchange = instrument_data.get("exchange", "NSE")
+            name = instrument_data.get("name", "")
 
-    # If no exchange IDs found, add as NSE by default
-    if not instruments:
-        instruments.append(Instrument(symbol, "NSE", name))
-        logger.warning(f"No exchange IDs found for {symbol}, added as NSE")
+            if symbol:
+                instruments.append(Instrument(symbol, exchange, name))
+                logger.debug(f"Created instrument: {symbol} on {exchange}")
 
     return instruments
 
@@ -176,6 +227,6 @@ def createInstrumentManager() -> InstrumentManager:
             manager.instruments.append(instrument)
 
     logger.info(
-        f" Created instrument manager with {len(manager)} instruments from MongoDB"
+        f"Created instrument manager with {len(manager)} instruments from MongoDB"
     )
     return manager

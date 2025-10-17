@@ -155,7 +155,7 @@ class TwelveDataManager:
 
             if price:
                 logger.info(
-                    f"📊 {symbol}: Price={price}, Volume={volume}, "
+                    f"{symbol}: Price={price}, Volume={volume}, "
                     f"Change={change} ({percent_change}%)"
                 )
 
@@ -183,9 +183,9 @@ class TwelveDataManager:
         """
         try:
             # Check if market is open
-            # if not isMarketOpen():
-            #     logger.warning("Market is closed. Waiting for market to open...")
-            #     return False
+            if not isMarketOpen():
+                logger.warning("Market is closed. Waiting for market to open...")
+                return False
 
             # Get Twelve Data client
             logger.note(" Getting Twelve Data client...")
@@ -200,7 +200,7 @@ class TwelveDataManager:
                 return False
 
             logger.success(
-                f" Successfully connected. Tracking {len(self.symbols)} symbols"
+                f"Successfully connected. Tracking {len(self.symbols)} symbols"
             )
 
             self.is_running = True
@@ -219,19 +219,19 @@ class TwelveDataManager:
 
         while not self.shutdown_event.is_set():
             # Check market hours
-            # if not isMarketOpen():
-            #     wait_time = getTimeUntilMarketOpen()
-            #     hours = wait_time // 3600
-            #     minutes = (wait_time % 3600) // 60
-            #     logger.info(f"Market closed. Next open in {hours}h {minutes}m")
+            if not isMarketOpen():
+                wait_time = getTimeUntilMarketOpen()
+                hours = wait_time // 3600
+                minutes = (wait_time % 3600) // 60
+                logger.info(f"Market closed. Next open in {hours}h {minutes}m")
 
-            #     # Sleep in chunks to respond to shutdown
-            #     for _ in range(0, wait_time, 10):
-            #         if shutdown_event.is_set():
-            #             return
-            #         time.sleep(min(10, wait_time))
+                # Sleep in chunks to respond to shutdown
+                for _ in range(0, wait_time, 10):
+                    if shutdown_event.is_set():
+                        return
+                    time.sleep(min(10, wait_time))
 
-            #     continue
+                continue
 
             # Connect
             if not self.connect():
@@ -264,10 +264,10 @@ class TwelveDataManager:
                 logger.error(f"Error in polling loop: {e}")
                 self.handleReconnect()
 
-            # # Check if we should continue (market hours)
-            # if not isMarketOpen():
-            #     logger.info("Market closed. Stopping data fetching.")
-            #     break
+            # Check if we should continue (market hours)
+            if not isMarketOpen():
+                logger.info("Market closed. Stopping data fetching.")
+                break
 
     def handleReconnect(self) -> None:
         """Handle reconnection with exponential backoff"""
@@ -278,7 +278,7 @@ class TwelveDataManager:
 
         if self.reconnect_attempts > MAX_RECONNECT_ATTEMPTS:
             logger.error(
-                f" Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached"
+                f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached"
             )
 
             # Reset after waiting (with shutdown check)
@@ -296,7 +296,7 @@ class TwelveDataManager:
         )
 
         logger.warning(
-            f" Reconnecting in {delay}s (attempt {self.reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
+            f"Reconnecting in {delay}s (attempt {self.reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
         )
 
         for _ in range(int(delay)):
@@ -331,6 +331,4 @@ def healthCheck(manager: TwelveDataManager) -> None:
             ).total_seconds()
 
             if time_since_last_update > 300:  # 5 minutes
-                logger.warning(
-                    f" No updates received for {time_since_last_update:.0f}s"
-                )
+                logger.warning(f"No updates received for {time_since_last_update:.0f}s")
