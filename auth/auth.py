@@ -45,7 +45,7 @@ class TwelveDataAuth:
 
             if not api_key:
                 logger.error(
-                    "❌ Missing Twelve Data API key. Please set TWELVEDATA_API_KEY in .env file"
+                    " Missing Twelve Data API key. Please set TWELVEDATA_API_KEY in .env file"
                 )
                 logger.info(
                     "💡 Get your free API key from: https://twelvedata.com/apikey"

@@ -176,6 +176,6 @@ def createInstrumentManager() -> InstrumentManager:
             manager.instruments.append(instrument)
 
     logger.info(
-        f"✅ Created instrument manager with {len(manager)} instruments from MongoDB"
+        f" Created instrument manager with {len(manager)} instruments from MongoDB"
     )
     return manager

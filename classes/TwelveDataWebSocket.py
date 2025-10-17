@@ -95,7 +95,7 @@ class WebSocketConnection:
                 elif event_type == "error":
                     error_msg = event.get("message", "Unknown error")
                     logger.error(
-                        f"❌ [WS-{self.connection_id}] WebSocket error: {error_msg}"
+                        f" [WS-{self.connection_id}] WebSocket error: {error_msg}"
                     )
 
                 else:
@@ -169,7 +169,7 @@ class WebSocketConnection:
             self.last_message_time = getCurrentTimeIST()
 
             logger.success(
-                f"✅ [WS-{self.connection_id}] Connected! Streaming {len(self.symbols)} symbols"
+                f" [WS-{self.connection_id}] Connected! Streaming {len(self.symbols)} symbols"
             )
             return True
 
@@ -199,7 +199,7 @@ class WebSocketConnection:
 
                 if time_since_last_msg > 300:  # 5 minutes
                     logger.warning(
-                        f"⚠️ [WS-{self.connection_id}] No messages for {time_since_last_msg:.0f}s"
+                        f" [WS-{self.connection_id}] No messages for {time_since_last_msg:.0f}s"
                     )
 
             time.sleep(10)  # Check every 10 seconds
@@ -260,9 +260,7 @@ class TwelveDataWebSocket:
                 connection = WebSocketConnection(self.client, symbol_chunk, idx + 1)
                 self.connections.append(connection)
 
-            logger.success(
-                f"✅ Created {len(self.connections)} WebSocket connection(s)"
-            )
+            logger.success(f" Created {len(self.connections)} WebSocket connection(s)")
             return True
 
         except Exception as e:
@@ -303,7 +301,7 @@ class TwelveDataWebSocket:
 
             if all_connected:
                 logger.success(
-                    f"✅ All {len(self.connections)} WebSocket(s) connected successfully"
+                    f" All {len(self.connections)} WebSocket(s) connected successfully"
                 )
                 self.is_running = True
                 self.reconnect_attempts = 0
@@ -343,9 +341,7 @@ class TwelveDataWebSocket:
 
             # Keep connections alive
             try:
-                logger.info(
-                    "✅ WebSocket streaming active. Receiving real-time data..."
-                )
+                logger.info(" WebSocket streaming active. Receiving real-time data...")
 
                 # Start keep-alive threads for each connection
                 threads = []
@@ -388,7 +384,7 @@ class TwelveDataWebSocket:
 
         if self.reconnect_attempts > MAX_RECONNECT_ATTEMPTS:
             logger.error(
-                f"❌ Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached"
+                f" Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached"
             )
 
             # Reset after waiting
@@ -403,7 +399,7 @@ class TwelveDataWebSocket:
         )
 
         logger.warning(
-            f"🔄 Reconnecting in {delay}s (attempt {self.reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
+            f" Reconnecting in {delay}s (attempt {self.reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
         )
 
         # Disconnect existing connections
@@ -449,5 +445,5 @@ def healthCheck(ws_manager: TwelveDataWebSocket) -> None:
 
                     if time_since_last_msg > 180:  # 3 minutes
                         logger.warning(
-                            f"⚠️ [WS-{connection.connection_id}] No messages for {time_since_last_msg:.0f}s"
+                            f" [WS-{connection.connection_id}] No messages for {time_since_last_msg:.0f}s"
                         )

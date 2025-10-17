@@ -70,7 +70,7 @@ def apiKeyValidationJob():
             try:
                 if not validateApiKey():
                     logger.warning(
-                        "⚠️  API key validation failed. Please check TWELVEDATA_API_KEY in .env file.\n"
+                        "  API key validation failed. Please check TWELVEDATA_API_KEY in .env file.\n"
                         "   Get your free API key from: https://twelvedata.com/apikey"
                     )
             except Exception as e:

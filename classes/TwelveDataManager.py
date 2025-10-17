@@ -200,7 +200,7 @@ class TwelveDataManager:
                 return False
 
             logger.success(
-                f"✅ Successfully connected. Tracking {len(self.symbols)} symbols"
+                f" Successfully connected. Tracking {len(self.symbols)} symbols"
             )
 
             self.is_running = True
@@ -278,7 +278,7 @@ class TwelveDataManager:
 
         if self.reconnect_attempts > MAX_RECONNECT_ATTEMPTS:
             logger.error(
-                f"❌ Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached"
+                f" Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached"
             )
 
             # Reset after waiting (with shutdown check)
@@ -296,7 +296,7 @@ class TwelveDataManager:
         )
 
         logger.warning(
-            f"🔄 Reconnecting in {delay}s (attempt {self.reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
+            f" Reconnecting in {delay}s (attempt {self.reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})"
         )
 
         for _ in range(int(delay)):
@@ -332,5 +332,5 @@ def healthCheck(manager: TwelveDataManager) -> None:
 
             if time_since_last_update > 300:  # 5 minutes
                 logger.warning(
-                    f"⚠️ No updates received for {time_since_last_update:.0f}s"
+                    f" No updates received for {time_since_last_update:.0f}s"
                 )
