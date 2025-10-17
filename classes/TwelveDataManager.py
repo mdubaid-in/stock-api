@@ -227,7 +227,7 @@ class TwelveDataManager:
 
                 # Sleep in chunks to respond to shutdown
                 for _ in range(0, wait_time, 10):
-                    if shutdown_event.is_set():
+                    if self.shutdown_event.is_set():
                         return
                     time.sleep(min(10, wait_time))
 

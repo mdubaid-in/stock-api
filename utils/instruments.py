@@ -204,6 +204,11 @@ def createInstrumentsForBothExchanges(mongoInstrument: Dict) -> List[Instrument]
             if symbol:
                 instruments.append(Instrument(symbol, exchange, name))
                 logger.debug(f"Created instrument: {symbol} on {exchange}")
+    else:
+        # If no crossListings found, log a warning
+        logger.warning(
+            f"No crossListings found for document: {mongoInstrument.get('_id', 'unknown')}"
+        )
 
     return instruments
 
