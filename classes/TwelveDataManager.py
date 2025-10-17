@@ -5,7 +5,7 @@ Manages real-time data fetching for Indian stocks using Twelve Data API
 
 import time
 from threading import Event, Lock
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 from datetime import datetime
 from collections import deque
 
@@ -22,9 +22,10 @@ from log.logging import logger
 # Rate Limiting Configuration
 # Free Plan: 8 API credits per minute (1 request = 1 credit for quote)
 # Pro Plan: 800 API credits per minute
+# Grow Plan: 55 API credits per minute
 # Can be configured based on your plan
-RATE_LIMIT_PER_MINUTE = 8  # Conservative for free plan
-POLLING_INTERVAL = 10  # seconds between updates (6 updates per minute)
+RATE_LIMIT_PER_MINUTE = 55  # Grow plan limit
+POLLING_INTERVAL = 5
 
 # Health check configuration
 HEALTH_CHECK_INTERVAL = 60  # seconds
@@ -32,12 +33,12 @@ MAX_RECONNECT_ATTEMPTS = 5
 INITIAL_RECONNECT_DELAY = 5  # seconds
 MAX_RECONNECT_DELAY = 60  # seconds
 
-# Global state
-shutdown_event = Event()
+# Global state - will be set by main.py
+shutdown_event = None
 
 
 class RateLimiter:
-    """Rate limiter to ensure API calls stay within Twelve Data limits"""
+    """Rate limiter to ensure API calls stay within Twelve Data Grow plan limits (55 calls/minute)"""
 
     def __init__(self, per_minute: int):
         self.per_minute = per_minute
@@ -76,8 +77,9 @@ class RateLimiter:
 class TwelveDataManager:
     """Manages Twelve Data API connection with automatic polling and market hours awareness"""
 
-    def __init__(self, instrumentManager: InstrumentManager):
+    def __init__(self, instrumentManager: InstrumentManager, shutdown_event: Event):
         self.instrumentManager = instrumentManager
+        self.shutdown_event = shutdown_event
         self.client: Optional[TDClient] = None
         self.reconnect_attempts = 0
         self.is_running = False
@@ -91,7 +93,7 @@ class TwelveDataManager:
         """
         try:
             if not self.symbols:
-                logger.warning("⚠️ No symbols to fetch data for")
+                logger.warning("No symbols to fetch data for")
                 return
 
             # Use rate limiter before API call
@@ -101,7 +103,7 @@ class TwelveDataManager:
             if len(self.symbols) == 1:
                 # Single symbol
                 symbol = self.symbols[0]
-                logger.debug(f"📡 Fetching data for {symbol}...")
+                logger.debug(f"Fetching data for {symbol}...")
 
                 quote = self.client.quote(symbol=symbol)
                 result = quote.as_json()
@@ -110,13 +112,14 @@ class TwelveDataManager:
                     self.processQuoteData(result)
                     self.last_update_time = getCurrentTimeIST()
             else:
-                # Multiple symbols - fetch in batches to respect rate limits
+                # Multiple symbols - fetch with optimized rate limiting for Grow plan
+                # With 55 calls/minute, we can fetch all 5 symbols quickly
                 for symbol in self.symbols:
-                    if shutdown_event.is_set():
+                    if self.shutdown_event.is_set():
                         break
 
                     self.rate_limiter.acquire()
-                    logger.debug(f"📡 Fetching data for {symbol}...")
+                    logger.debug(f"Fetching data for {symbol}...")
 
                     try:
                         quote = self.client.quote(symbol=symbol)
@@ -125,15 +128,15 @@ class TwelveDataManager:
                         if result:
                             self.processQuoteData(result)
                     except Exception as e:
-                        logger.error(f"❌ Error fetching {symbol}: {e}")
+                        logger.error(f"Error fetching {symbol}: {e}")
 
-                    # Small delay between requests
-                    time.sleep(0.5)
+                    # Reduced delay for Grow plan - more responsive data
+                    time.sleep(0.2)
 
                 self.last_update_time = getCurrentTimeIST()
 
         except Exception as e:
-            logger.error(f"❌ Error fetching data: {e}")
+            logger.error(f"Error fetching data: {e}")
 
     def processQuoteData(self, data: Dict) -> None:
         """
@@ -169,7 +172,7 @@ class TwelveDataManager:
                 # })
 
         except Exception as e:
-            logger.error(f"❌ Error processing quote data: {e}")
+            logger.error(f"Error processing quote data: {e}")
 
     def connect(self) -> bool:
         """
@@ -180,27 +183,25 @@ class TwelveDataManager:
         """
         try:
             # Check if market is open
-            if not isMarketOpen():
-                logger.warning("⏸️ Market is closed. Waiting for market to open...")
-                return False
+            # if not isMarketOpen():
+            #     logger.warning("Market is closed. Waiting for market to open...")
+            #     return False
 
             # Get Twelve Data client
             logger.note("🔐 Getting Twelve Data client...")
             self.client = getClient()
 
             if not self.client:
-                logger.error("❌ Failed to get Twelve Data client")
+                logger.error("Failed to get Twelve Data client")
                 return False
 
             if not self.symbols:
-                logger.error("❌ No instruments to track")
+                logger.error("No instruments to track")
                 return False
 
             logger.success(
                 f"✅ Successfully connected. Tracking {len(self.symbols)} symbols"
             )
-            logger.info(f"📝 Symbols: {', '.join(self.symbols)}")
-            logger.info(f"⏰ Polling interval: {POLLING_INTERVAL} seconds")
 
             self.is_running = True
             self.reconnect_attempts = 0
@@ -209,28 +210,28 @@ class TwelveDataManager:
             return True
 
         except Exception as e:
-            logger.error(f"❌ Error connecting: {e}")
+            logger.error(f"Error connecting: {e}")
             return False
 
     def run(self) -> None:
         """Run data fetching loop with automatic polling"""
-        logger.info("🚀 Starting Twelve Data Manager...")
+        logger.info("Starting Twelve Data Manager...")
 
-        while not shutdown_event.is_set():
+        while not self.shutdown_event.is_set():
             # Check market hours
-            if not isMarketOpen():
-                wait_time = getTimeUntilMarketOpen()
-                hours = wait_time // 3600
-                minutes = (wait_time % 3600) // 60
-                logger.info(f"⏰ Market closed. Next open in {hours}h {minutes}m")
+            # if not isMarketOpen():
+            #     wait_time = getTimeUntilMarketOpen()
+            #     hours = wait_time // 3600
+            #     minutes = (wait_time % 3600) // 60
+            #     logger.info(f"Market closed. Next open in {hours}h {minutes}m")
 
-                # Sleep in chunks to respond to shutdown
-                for _ in range(0, wait_time, 10):
-                    if shutdown_event.is_set():
-                        return
-                    time.sleep(min(10, wait_time))
+            #     # Sleep in chunks to respond to shutdown
+            #     for _ in range(0, wait_time, 10):
+            #         if shutdown_event.is_set():
+            #             return
+            #         time.sleep(min(10, wait_time))
 
-                continue
+            #     continue
 
             # Connect
             if not self.connect():
@@ -239,36 +240,38 @@ class TwelveDataManager:
 
             # Polling loop
             try:
-                logger.info("✅ Connected. Starting data polling...")
+                logger.info("Connected. Starting data polling...")
 
                 while (
-                    self.is_running and isMarketOpen() and not shutdown_event.is_set()
+                    self.is_running
+                    and isMarketOpen()
+                    and not self.shutdown_event.is_set()
                 ):
                     # Fetch latest data
                     self.fetchData()
 
                     # Wait for next polling interval
                     for _ in range(POLLING_INTERVAL):
-                        if shutdown_event.is_set() or not isMarketOpen():
+                        if self.shutdown_event.is_set() or not isMarketOpen():
                             break
                         time.sleep(1)
 
             except KeyboardInterrupt:
-                logger.info("⏹️ Keyboard interrupt received")
+                logger.info("Keyboard interrupt received")
                 break
 
             except Exception as e:
-                logger.error(f"❌ Error in polling loop: {e}")
+                logger.error(f"Error in polling loop: {e}")
                 self.handleReconnect()
 
-            # Check if we should continue (market hours)
-            if not isMarketOpen():
-                logger.info("📴 Market closed. Stopping data fetching.")
-                break
+            # # Check if we should continue (market hours)
+            # if not isMarketOpen():
+            #     logger.info("Market closed. Stopping data fetching.")
+            #     break
 
     def handleReconnect(self) -> None:
         """Handle reconnection with exponential backoff"""
-        if shutdown_event.is_set():
+        if self.shutdown_event.is_set():
             return
 
         self.reconnect_attempts += 1
@@ -278,8 +281,11 @@ class TwelveDataManager:
                 f"❌ Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached"
             )
 
-            # Reset after waiting
-            time.sleep(60)
+            # Reset after waiting (with shutdown check)
+            for _ in range(60):
+                if self.shutdown_event.is_set():
+                    return
+                time.sleep(1)
             self.reconnect_attempts = 0
             return
 
@@ -294,27 +300,27 @@ class TwelveDataManager:
         )
 
         for _ in range(int(delay)):
-            if shutdown_event.is_set():
+            if self.shutdown_event.is_set():
                 return
             time.sleep(1)
 
     def stop(self) -> None:
         """Stop data fetching gracefully"""
         self.is_running = False
-        logger.info("🛑 Twelve Data Manager stopped")
+        logger.info("Twelve Data Manager stopped")
 
 
 def healthCheck(manager: TwelveDataManager) -> None:
     """Monitor data fetching health and market hours"""
-    while not shutdown_event.is_set():
+    while not manager.shutdown_event.is_set():
         time.sleep(HEALTH_CHECK_INTERVAL)
 
-        if shutdown_event.is_set():
+        if manager.shutdown_event.is_set():
             break
 
         # Check if market should close
         if not isMarketOpen() and manager.is_running:
-            logger.info("⏰ Market hours ended. Shutting down...")
+            logger.info("Market hours ended. Shutting down...")
             manager.stop()
             break
 

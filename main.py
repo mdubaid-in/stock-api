@@ -66,7 +66,7 @@ def apiKeyValidationJob():
             time.sleep(1)
 
         if not shutdown_event.is_set():
-            logger.debug("🔍 Validating Twelve Data API key...")
+            logger.debug("Validating Twelve Data API key...")
             try:
                 if not validateApiKey():
                     logger.warning(
@@ -74,53 +74,63 @@ def apiKeyValidationJob():
                         "   Get your free API key from: https://twelvedata.com/apikey"
                     )
             except Exception as e:
-                logger.error(f"❌ API key validation failed: {e}")
+                logger.error(f"API key validation failed: {e}")
 
 
 def signalHandler(signal, frame):
     """Handle shutdown signals gracefully"""
-    logger.info(f"\n🛑 Received signal {signal}. Shutting down gracefully...")
+    logger.info(f"\nReceived signal {signal}. Shutting down gracefully...")
     shutdown_event.set()
+
+    # Force exit after a short delay if threads don't stop
+    def force_exit():
+        time.sleep(3)  # Give threads 3 seconds to stop
+        if not shutdown_event.is_set():
+            logger.warning("Forcing exit due to unresponsive threads")
+        sys.exit(0)
+
+    # Start force exit thread
+    exit_thread = Thread(target=force_exit, daemon=True)
+    exit_thread.start()
 
 
 def main():
     """Main application entry point"""
     logger.info("=" * 70)
-    logger.info("🚀 Stock Market Data Streaming Application (Twelve Data API)")
+    logger.info("Stock Market Data Streaming Application (Twelve Data API)")
     logger.info("=" * 70)
     logger.info(
         f"📅 Current time (IST): {getCurrentTimeIST().strftime('%Y-%m-%d %H:%M:%S')}"
     )
-    logger.info(f"📡 Data Source: {DATA_SOURCE}")
-    logger.info(f"📊 Tracking {len(SYMBOLS)} Indian NSE stocks: {', '.join(SYMBOLS)}")
+    logger.info(f"Data Source: {DATA_SOURCE}")
 
     # Register signal handlers
     signal.signal(signal.SIGINT, signalHandler)
     signal.signal(signal.SIGTERM, signalHandler)
 
     # Validate API key first
-    logger.note("🔑 Validating Twelve Data API key...")
+    logger.note("Validating Twelve Data API key...")
     if not validateApiKey():
-        logger.error("❌ API key validation failed. Please check your .env file.")
-        logger.info("💡 Get your free API key from: https://twelvedata.com/apikey")
+        logger.error("API key validation failed. Please check your .env file.")
+        logger.info("Get your free API key from: https://twelvedata.com/apikey")
         sys.exit(1)
 
     # Check initial market status
-    if not isMarketOpen():
-        wait_time = getTimeUntilMarketOpen()
-        hours = wait_time // 3600
-        minutes = (wait_time % 3600) // 60
-        logger.info(f"⏰ Market is currently closed")
-        logger.info(f"⏳ Market opens in {hours}h {minutes}m")
-        logger.info("💤 Waiting for market to open...")
+    # if not isMarketOpen():
+    #     wait_time = getTimeUntilMarketOpen()
+    #     hours = wait_time // 3600
+    #     minutes = (wait_time % 3600) // 60
+    #     logger.info(f"Market is currently closed")
+    #     logger.info(f"Market opens in {hours}h {minutes}m")
+    #     logger.info("Waiting for market to open...")
 
     # Create instrument manager with configured symbols
-    logger.note("📝 Initializing instruments...")
-    instrumentManager = createInstrumentManager(SYMBOLS)
-    logger.success(f"✅ Initialized {len(instrumentManager)} instruments")
+    logger.note("Initializing instruments...")
+    instrumentManager = createInstrumentManager()
+    logger.success(f"Initialized {len(instrumentManager.instruments)} instruments")
 
     # Initialize data manager (WebSocket or REST API based on configuration)
-    data_manager = DataManager(instrumentManager)
+    data_manager = DataManager(instrumentManager, shutdown_event)
 
     # Start health check thread
     health_thread = Thread(target=healthCheck, args=(data_manager,), daemon=True)
@@ -131,21 +141,31 @@ def main():
     validation_thread.start()
 
     # Start data fetching (will wait for market hours internally)
-    data_thread = Thread(target=data_manager.run, daemon=False)
+    data_thread = Thread(target=data_manager.run, daemon=True)
     data_thread.start()
 
     # Wait for shutdown
     try:
-        data_thread.join()
+        while not shutdown_event.is_set():
+            time.sleep(0.1)  # Small sleep to prevent busy waiting
     except KeyboardInterrupt:
-        logger.info("⏹️ Keyboard interrupt in main thread")
+        logger.info("Keyboard interrupt in main thread")
         shutdown_event.set()
 
+    # Wait for data thread to finish with timeout
+    logger.info("Waiting for threads to finish...")
+    data_thread.join(timeout=3)  # Give it 3 seconds to finish gracefully
+
+    if data_thread.is_alive():
+        logger.warning("Data thread did not stop gracefully, forcing exit")
+        # Force stop the data manager
+        data_manager.stop()
+
     # Cleanup
-    logger.info("🧹 Cleaning up...")
+    logger.info("Cleaning up...")
     data_manager.stop()
 
-    logger.info("👋 Application stopped successfully")
+    logger.info("Application stopped successfully")
     logger.info("=" * 60)
 
 
@@ -153,5 +173,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        logger.error(f"❌ Fatal error: {e}")
+        logger.error(f"Fatal error: {e}")
         sys.exit(1)

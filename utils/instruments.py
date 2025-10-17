@@ -5,6 +5,7 @@ Handles managing trading symbols for Twelve Data API
 
 from typing import List, Dict, Optional
 from log.logging import logger
+from db.mongoClient import mongo_client
 
 
 class Instrument:
@@ -80,68 +81,101 @@ class InstrumentManager:
     def clear(self) -> None:
         """Clear all instruments"""
         self.instruments.clear()
-        logger.debug("🗑️ Cleared all instruments")
+        logger.debug("Cleared all instruments")
 
     def __len__(self) -> int:
         return len(self.instruments)
 
 
-# Predefined popular Indian stocks (NSE)
-POPULAR_INSTRUMENTS = {
-    # Nifty 50 stocks
-    "RELIANCE": Instrument("RELIANCE", "NSE", "Reliance Industries"),
-    "TCS": Instrument("TCS", "NSE", "Tata Consultancy Services"),
-    "HDFCBANK": Instrument("HDFCBANK", "NSE", "HDFC Bank"),
-    "INFY": Instrument("INFY", "NSE", "Infosys"),
-    "ICICIBANK": Instrument("ICICIBANK", "NSE", "ICICI Bank"),
-    "HINDUNILVR": Instrument("HINDUNILVR", "NSE", "Hindustan Unilever"),
-    "ITC": Instrument("ITC", "NSE", "ITC Limited"),
-    "SBIN": Instrument("SBIN", "NSE", "State Bank of India"),
-    "BHARTIARTL": Instrument("BHARTIARTL", "NSE", "Bharti Airtel"),
-    "KOTAKBANK": Instrument("KOTAKBANK", "NSE", "Kotak Mahindra Bank"),
-    "LT": Instrument("LT", "NSE", "Larsen & Toubro"),
-    "AXISBANK": Instrument("AXISBANK", "NSE", "Axis Bank"),
-    "ASIANPAINT": Instrument("ASIANPAINT", "NSE", "Asian Paints"),
-    "MARUTI": Instrument("MARUTI", "NSE", "Maruti Suzuki"),
-    "WIPRO": Instrument("WIPRO", "NSE", "Wipro"),
-    "TATAMOTORS": Instrument("TATAMOTORS", "NSE", "Tata Motors"),
-    "TATASTEEL": Instrument("TATASTEEL", "NSE", "Tata Steel"),
-    "SUNPHARMA": Instrument("SUNPHARMA", "NSE", "Sun Pharmaceutical"),
-    "TITAN": Instrument("TITAN", "NSE", "Titan Company"),
-    "ULTRACEMCO": Instrument("ULTRACEMCO", "NSE", "UltraTech Cement"),
-    "BAJFINANCE": Instrument("BAJFINANCE", "NSE", "Bajaj Finance"),
-    "TECHM": Instrument("TECHM", "NSE", "Tech Mahindra"),
-    "POWERGRID": Instrument("POWERGRID", "NSE", "Power Grid Corporation"),
-    "NESTLEIND": Instrument("NESTLEIND", "NSE", "Nestle India"),
-    "HCLTECH": Instrument("HCLTECH", "NSE", "HCL Technologies"),
-}
-
-
-def createInstrumentManager(symbols: List[str]) -> InstrumentManager:
+def fetchInstrumentsFromMongo() -> List[Dict]:
     """
-    Create instrument manager with predefined symbols
-
-    Args:
-        symbols: List of trading symbols
+    Fetch all instruments from MongoDB stockMaster collection
 
     Returns:
-        Configured InstrumentManager instance
+        List of instrument documents from MongoDB
+    """
+    try:
+        stock_master = mongo_client.get_collection("stockMaster")
+        instruments = list(stock_master.find({}))
+        return instruments
+    except Exception as e:
+        logger.error(f"Error fetching instruments from MongoDB: {e}")
+        return []
+
+
+def getInstrumentBySymbol(symbol: str) -> Optional[Dict]:
+    """
+    Get a specific instrument from MongoDB by symbol
+
+    Args:
+        symbol: Trading symbol to search for
+
+    Returns:
+        Instrument document if found, None otherwise
+    """
+    try:
+        stockMasterCollection = mongo_client.get_collection("stockMaster")
+        instrument = stockMasterCollection.find_one({"symbol": symbol})
+        if instrument:
+            logger.debug(f"Found instrument for symbol: {symbol}")
+        else:
+            logger.warning(f"No instrument found for symbol: {symbol}")
+        return instrument
+    except Exception as e:
+        logger.error(f"Error fetching instrument for symbol {symbol}: {e}")
+        return None
+
+
+def createInstrumentsForBothExchanges(mongoInstrument: Dict) -> List[Instrument]:
+    """
+    Create Instrument objects for NSE and BSE based on available exchange IDs
+
+    Args:
+        mongoInstrument: Instrument document from MongoDB
+
+    Returns:
+        List of Instrument objects (one for each available exchange)
+    """
+    instruments = []
+    symbol = mongoInstrument["symbol"]
+    name = mongoInstrument.get("listedName") or mongoInstrument.get("companyName")
+
+    # Add NSE instrument if nseId exists
+    if mongoInstrument.get("nseId"):
+        instruments.append(Instrument(symbol, "NSE", name))
+
+    # Add BSE instrument if bseId exists
+    if mongoInstrument.get("bseId"):
+        bse_id = mongoInstrument.get("bseId")
+        instruments.append(Instrument(bse_id, "XBOM", name))
+
+    # If no exchange IDs found, add as NSE by default
+    if not instruments:
+        instruments.append(Instrument(symbol, "NSE", name))
+        logger.warning(f"No exchange IDs found for {symbol}, added as NSE")
+
+    return instruments
+
+
+def createInstrumentManager() -> InstrumentManager:
+    """
+    Create instrument manager with symbols from MongoDB stockMaster collection
+    Returns:
+        Configured InstrumentManager instance with both NSE and BSE instruments
     """
     manager = InstrumentManager()
 
-    for symbol in symbols:
-        if symbol in POPULAR_INSTRUMENTS:
-            instrument = POPULAR_INSTRUMENTS[symbol]
-            manager.addInstrument(
-                instrument.symbol,
-                instrument.exchange,
-                instrument.name,
-            )
-        else:
-            # Add as custom NSE symbol
-            logger.warning(
-                f"⚠️ Symbol '{symbol}' not in popular instruments, adding as NSE stock"
-            )
-            manager.addInstrument(symbol, "NSE", symbol)
+    # Fetch all instruments from MongoDB
+    mongoInstruments = fetchInstrumentsFromMongo()
+    logger.info(f"Processing {len(mongoInstruments)} instruments from MongoDB")
 
+    for mongoInstrument in mongoInstruments:
+        # Always create instruments for both exchanges if available
+        instruments = createInstrumentsForBothExchanges(mongoInstrument)
+        for instrument in instruments:
+            manager.instruments.append(instrument)
+
+    logger.info(
+        f"✅ Created instrument manager with {len(manager)} instruments from MongoDB"
+    )
     return manager

@@ -30,8 +30,8 @@ MAX_RECONNECT_ATTEMPTS = 5
 INITIAL_RECONNECT_DELAY = 5  # seconds
 MAX_RECONNECT_DELAY = 60  # seconds
 
-# Global state
-shutdown_event = Event()
+# Global state - will be set by main.py
+shutdown_event = None
 
 
 class WebSocketConnection:
@@ -102,7 +102,7 @@ class WebSocketConnection:
                     logger.debug(f"📨 [WS-{self.connection_id}] Event: {event_type}")
 
         except Exception as e:
-            logger.error(f"❌ [WS-{self.connection_id}] Error processing event: {e}")
+            logger.error(f"[WS-{self.connection_id}] Error processing event: {e}")
 
     def connect(self) -> bool:
         """
@@ -174,7 +174,7 @@ class WebSocketConnection:
             return True
 
         except Exception as e:
-            logger.error(f"❌ [WS-{self.connection_id}] Connection error: {e}")
+            logger.error(f"[WS-{self.connection_id}] Connection error: {e}")
             self.is_connected = False
             return False
 
@@ -186,11 +186,11 @@ class WebSocketConnection:
                 logger.info(f"🔌 [WS-{self.connection_id}] Disconnected")
             self.is_connected = False
         except Exception as e:
-            logger.error(f"❌ [WS-{self.connection_id}] Disconnect error: {e}")
+            logger.error(f"[WS-{self.connection_id}] Disconnect error: {e}")
 
     def keepAlive(self) -> None:
         """Keep WebSocket connection alive"""
-        while self.is_connected and not shutdown_event.is_set():
+        while self.is_connected and not self.shutdown_event.is_set():
             # Check if we received messages recently
             if self.last_message_time:
                 time_since_last_msg = (
@@ -208,8 +208,9 @@ class WebSocketConnection:
 class TwelveDataWebSocket:
     """Manages Twelve Data WebSocket connections for real-time streaming"""
 
-    def __init__(self, instrumentManager: InstrumentManager):
+    def __init__(self, instrumentManager: InstrumentManager, shutdown_event: Event):
         self.instrumentManager = instrumentManager
+        self.shutdown_event = shutdown_event
         self.client: Optional[TDClient] = None
         self.connections: List[WebSocketConnection] = []
         self.reconnect_attempts = 0
@@ -230,7 +231,7 @@ class TwelveDataWebSocket:
         """
         try:
             if not self.symbols:
-                logger.error("❌ No symbols to stream")
+                logger.error("No symbols to stream")
                 return False
 
             # Split symbols into groups for multiple connections
@@ -265,7 +266,7 @@ class TwelveDataWebSocket:
             return True
 
         except Exception as e:
-            logger.error(f"❌ Error creating connections: {e}")
+            logger.error(f"Error creating connections: {e}")
             return False
 
     def connect(self) -> bool:
@@ -278,7 +279,7 @@ class TwelveDataWebSocket:
         try:
             # Check if market is open
             if not isMarketOpen():
-                logger.warning("⏸️ Market is closed. Waiting for market to open...")
+                logger.warning("Market is closed. Waiting for market to open...")
                 return False
 
             # Get Twelve Data client
@@ -286,7 +287,7 @@ class TwelveDataWebSocket:
             self.client = getClient()
 
             if not self.client:
-                logger.error("❌ Failed to get Twelve Data client")
+                logger.error("Failed to get Twelve Data client")
                 return False
 
             # Create connections
@@ -308,28 +309,28 @@ class TwelveDataWebSocket:
                 self.reconnect_attempts = 0
                 return True
             else:
-                logger.error("❌ Some WebSocket connections failed")
+                logger.error("Some WebSocket connections failed")
                 return False
 
         except Exception as e:
-            logger.error(f"❌ Error connecting WebSockets: {e}")
+            logger.error(f"Error connecting WebSockets: {e}")
             return False
 
     def run(self) -> None:
         """Run WebSocket streaming with automatic reconnection"""
-        logger.info("🚀 Starting Twelve Data WebSocket Manager...")
+        logger.info("Starting Twelve Data WebSocket Manager...")
 
-        while not shutdown_event.is_set():
+        while not self.shutdown_event.is_set():
             # Check market hours
             if not isMarketOpen():
                 wait_time = getTimeUntilMarketOpen()
                 hours = wait_time // 3600
                 minutes = (wait_time % 3600) // 60
-                logger.info(f"⏰ Market closed. Next open in {hours}h {minutes}m")
+                logger.info(f"Market closed. Next open in {hours}h {minutes}m")
 
                 # Sleep in chunks to respond to shutdown
                 for _ in range(0, wait_time, 10):
-                    if shutdown_event.is_set():
+                    if self.shutdown_event.is_set():
                         return
                     time.sleep(min(10, wait_time))
 
@@ -355,7 +356,9 @@ class TwelveDataWebSocket:
 
                 # Monitor while market is open
                 while (
-                    self.is_running and isMarketOpen() and not shutdown_event.is_set()
+                    self.is_running
+                    and isMarketOpen()
+                    and not self.shutdown_event.is_set()
                 ):
                     time.sleep(1)
 
@@ -364,21 +367,21 @@ class TwelveDataWebSocket:
                     connection.is_connected = False
 
             except KeyboardInterrupt:
-                logger.info("⏹️ Keyboard interrupt received")
+                logger.info("Keyboard interrupt received")
                 break
 
             except Exception as e:
-                logger.error(f"❌ Error in WebSocket loop: {e}")
+                logger.error(f"Error in WebSocket loop: {e}")
                 self.handleReconnect()
 
             # Check if we should continue (market hours)
             if not isMarketOpen():
-                logger.info("📴 Market closed. Stopping WebSocket streaming.")
+                logger.info("Market closed. Stopping WebSocket streaming.")
                 break
 
     def handleReconnect(self) -> None:
         """Handle reconnection with exponential backoff"""
-        if shutdown_event.is_set():
+        if self.shutdown_event.is_set():
             return
 
         self.reconnect_attempts += 1
@@ -407,7 +410,7 @@ class TwelveDataWebSocket:
         self.stop()
 
         for _ in range(int(delay)):
-            if shutdown_event.is_set():
+            if self.shutdown_event.is_set():
                 return
             time.sleep(1)
 
@@ -419,20 +422,20 @@ class TwelveDataWebSocket:
             connection.disconnect()
 
         self.connections.clear()
-        logger.info("🛑 All WebSocket connections stopped")
+        logger.info("All WebSocket connections stopped")
 
 
 def healthCheck(ws_manager: TwelveDataWebSocket) -> None:
     """Monitor WebSocket health and market hours"""
-    while not shutdown_event.is_set():
+    while not ws_manager.shutdown_event.is_set():
         time.sleep(HEALTH_CHECK_INTERVAL)
 
-        if shutdown_event.is_set():
+        if ws_manager.shutdown_event.is_set():
             break
 
         # Check if market should close
         if not isMarketOpen() and ws_manager.is_running:
-            logger.info("⏰ Market hours ended. Shutting down WebSockets...")
+            logger.info("Market hours ended. Shutting down WebSockets...")
             ws_manager.stop()
             break
 

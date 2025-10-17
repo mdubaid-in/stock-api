@@ -56,11 +56,11 @@ class TwelveDataAuth:
             logger.note("🔐 Initializing Twelve Data client...")
             self._client = TDClient(apikey=api_key)
 
-            logger.success("✅ Successfully authenticated with Twelve Data API")
+            logger.success("Successfully authenticated with Twelve Data API")
             return self._client
 
         except Exception as e:
-            logger.error(f"❌ Authentication error: {e}")
+            logger.error(f"Authentication error: {e}")
             return None
 
     def validateApiKey(self) -> bool:
@@ -76,19 +76,19 @@ class TwelveDataAuth:
                 return False
 
             # Make a simple test request using a reliable free symbol
-            logger.note("🔍 Validating API key...")
+            logger.note("Validating API key...")
             test_response = client.price(symbol="AAPL")
             result = test_response.as_json()
 
             if result and "price" in result:
-                logger.success("✅ API key is valid")
+                logger.success("API key is valid")
                 return True
             else:
-                logger.error("❌ API key validation failed")
+                logger.error("API key validation failed")
                 return False
 
         except Exception as e:
-            logger.error(f"❌ API key validation error: {e}")
+            logger.error(f"API key validation error: {e}")
             return False
 
     def refreshClient(self) -> Optional[TDClient]:
@@ -98,7 +98,7 @@ class TwelveDataAuth:
         Returns:
             Optional[TDClient]: New Twelve Data client if successful
         """
-        logger.note("🔄 Refreshing Twelve Data client...")
+        logger.note("Refreshing Twelve Data client...")
         self._client = None
         return self.getClient()
 
