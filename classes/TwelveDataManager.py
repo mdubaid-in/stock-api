@@ -188,7 +188,7 @@ class TwelveDataManager:
             #     return False
 
             # Get Twelve Data client
-            logger.note("🔐 Getting Twelve Data client...")
+            logger.note(" Getting Twelve Data client...")
             self.client = getClient()
 
             if not self.client:

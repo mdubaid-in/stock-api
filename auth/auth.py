@@ -53,7 +53,7 @@ class TwelveDataAuth:
                 return None
 
             # Initialize Twelve Data client
-            logger.note("🔐 Initializing Twelve Data client...")
+            logger.note(" Initializing Twelve Data client...")
             self._client = TDClient(apikey=api_key)
 
             logger.success("Successfully authenticated with Twelve Data API")

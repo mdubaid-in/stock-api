@@ -281,7 +281,7 @@ class TwelveDataWebSocket:
                 return False
 
             # Get Twelve Data client
-            logger.note("🔐 Getting Twelve Data client for WebSocket...")
+            logger.note(" Getting Twelve Data client for WebSocket...")
             self.client = getClient()
 
             if not self.client:
