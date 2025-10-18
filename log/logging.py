@@ -7,11 +7,9 @@ from datetime import datetime
 
 
 home_dir = Path.home()
-log_folder = home_dir / "SocialMediaJobs"
+log_folder = home_dir / "stock-api"
 log_folder.mkdir(exist_ok=True)  # Create folder if it doesn't exist
-log_file = (
-    log_folder / f'social_media_jobs_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
-)
+log_file = log_folder / f'stock-api_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
 
 # Define custom log level for SUCCESS
 SUCCESS_LEVEL = 25

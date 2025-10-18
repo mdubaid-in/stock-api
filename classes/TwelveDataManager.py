@@ -5,12 +5,13 @@ Manages real-time data fetching for Indian stocks using Twelve Data API
 
 import time
 from threading import Event, Lock
-from typing import Optional, Dict
+from typing import Any, List, Optional, Dict
 from datetime import datetime
 from collections import deque
 
 from twelvedata import TDClient
 from auth.auth import getClient
+from db.stocks import save_stock_data
 from utils.marketHours import (
     isMarketOpen,
     getTimeUntilMarketOpen,
@@ -25,7 +26,7 @@ from log.logging import logger
 # Grow Plan: 55 API credits per minute
 # Can be configured based on your plan
 RATE_LIMIT_PER_MINUTE = 55  # Grow plan limit
-POLLING_INTERVAL = 5
+POLLING_INTERVAL = 60  # 1 minute
 
 # Health check configuration
 HEALTH_CHECK_INTERVAL = 60  # seconds
@@ -96,80 +97,105 @@ class TwelveDataManager:
                 logger.warning("No symbols to fetch data for")
                 return
 
-            # Use rate limiter before API call
-            self.rate_limiter.acquire()
+            stock_data = self.prepare_stock_data()
 
-            # Fetch quote for symbols (batch if multiple)
-            if len(self.symbols) == 1:
-                # Single symbol
-                symbol = self.symbols[0]
+            for symbol in self.symbols:
+                if self.shutdown_event.is_set():
+                    break
+
+                self.rate_limiter.acquire()
                 logger.debug(f"Fetching data for {symbol}...")
 
-                quote = self.client.quote(symbol=symbol)
-                result = quote.as_json()
+                try:
+                    quote = self.client.quote(symbol=symbol)
+                    result = quote.as_json()
 
-                if result:
-                    self.processQuoteData(result)
-                    self.last_update_time = getCurrentTimeIST()
-            else:
-                # Multiple symbols - fetch with optimized rate limiting for Grow plan
-                # With 55 calls/minute, we can fetch all 5 symbols quickly
-                for symbol in self.symbols:
-                    if self.shutdown_event.is_set():
-                        break
+                    if result:
+                        self.processQuoteData(result, stock_data)
 
-                    self.rate_limiter.acquire()
-                    logger.debug(f"Fetching data for {symbol}...")
-
-                    try:
-                        quote = self.client.quote(symbol=symbol)
-                        result = quote.as_json()
-
-                        if result:
-                            self.processQuoteData(result)
-                    except Exception as e:
-                        logger.error(f"Error fetching {symbol}: {e}")
-
-                    # Reduced delay for Grow plan - more responsive data
                     time.sleep(0.2)
+                except Exception as e:
+                    logger.error(f"Error fetching {symbol}: {e}")
 
+            # Only save data if not shutting down
+            if not self.shutdown_event.is_set():
+                save_stock_data(list(stock_data.values()))
                 self.last_update_time = getCurrentTimeIST()
 
         except Exception as e:
             logger.error(f"Error fetching data: {e}")
 
-    def processQuoteData(self, data: Dict) -> None:
+    def prepare_stock_data(self) -> Dict[str, Any]:
+        """
+        Prepare stock data map for stock data
+        """
+
+        date = getCurrentTimeIST().date().strftime("%Y%m%d")
+
+        return {
+            instrument.company_id: {
+                "_id": f"{instrument.company_id}_{date}",
+                "stock_name": instrument.name,
+                "company_id": instrument.company_id,
+                "createdAt": getCurrentTimeIST().replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                ),
+                "nse_data": None,
+                "bse_data": None,
+            }
+            for instrument in self.instrumentManager.instruments.values()
+        }
+
+    def processQuoteData(self, data: Dict, stock_data: Dict[str, Any]) -> None:
         """
         Process and log quote data
 
         Args:
             data: Quote data from Twelve Data API
+            stock_data: Dictionary to store stock data
         """
         try:
-            symbol = data.get("symbol", "Unknown")
-            price = data.get("close") or data.get("price")
-            volume = data.get("volume")
-            change = data.get("change")
-            percent_change = data.get("percent_change")
-            timestamp = data.get("timestamp", "")
+            symbol = data.get("symbol", None)
+            if not symbol:
+                logger.error("Symbol not found in data")
+                return None
 
-            if price:
-                logger.info(
-                    f"{symbol}: Price={price}, Volume={volume}, "
-                    f"Change={change} ({percent_change}%)"
-                )
+            instrument = self.instrumentManager.get_instrument(symbol)
+            if not instrument:
+                logger.error(f"Instrument not found for symbol: {symbol}")
+                return None
 
-                # TODO: Save to database here
-                # from db.mongoClient import mongoClient
-                # collection = mongoClient.get_collection('market_data')
-                # collection.insert_one({
-                #     'symbol': symbol,
-                #     'price': price,
-                #     'volume': volume,
-                #     'change': change,
-                #     'percent_change': percent_change,
-                #     'timestamp': getCurrentTimeIST()
-                # })
+            company_id = instrument.company_id
+            stock = stock_data.get(company_id, None)
+            if not stock:
+                logger.error(f"Stock data not found for company_id: {company_id}")
+                return None
+
+            exchange = data.get("exchange", None)
+
+            required_data = {
+                "open": round(float(data.get("open", 0)), 2),
+                "high": round(float(data.get("high", 0)), 2),
+                "low": round(float(data.get("low", 0)), 2),
+                "close": round(float(data.get("close", 0)), 2),
+                "prev_close": round(float(data.get("previous_close", 0)), 2),
+                "last_price": round(float(data.get("close", 0)), 2),
+                "volume": int(data.get("volume", 0)),
+                "change": round(float(data.get("change", 0)), 2),
+                "percent_change": round(float(data.get("percent_change", 0)), 2),
+                "createdAt": datetime.fromtimestamp(int(data["timestamp"])),
+                "type": exchange,
+            }
+
+            if exchange == "NSE":
+                stock_data[company_id]["nse_data"] = required_data
+            elif exchange == "BSE":
+                stock_data[company_id]["bse_data"] = required_data
+            else:
+                logger.error(f"Invalid exchange: {exchange}")
+                return None
+
+            print(stock_data[company_id])
 
         except Exception as e:
             logger.error(f"Error processing quote data: {e}")
@@ -183,9 +209,9 @@ class TwelveDataManager:
         """
         try:
             # Check if market is open
-            if not isMarketOpen():
-                logger.warning("Market is closed. Waiting for market to open...")
-                return False
+            # if not isMarketOpen():
+            #     logger.warning("Market is closed. Waiting for market to open...")
+            #     return False
 
             # Get Twelve Data client
             logger.note(" Getting Twelve Data client...")
@@ -219,19 +245,9 @@ class TwelveDataManager:
 
         while not self.shutdown_event.is_set():
             # Check market hours
-            if not isMarketOpen():
-                wait_time = getTimeUntilMarketOpen()
-                hours = wait_time // 3600
-                minutes = (wait_time % 3600) // 60
-                logger.info(f"Market closed. Next open in {hours}h {minutes}m")
-
-                # Sleep in chunks to respond to shutdown
-                for _ in range(0, wait_time, 10):
-                    if self.shutdown_event.is_set():
-                        return
-                    time.sleep(min(10, wait_time))
-
-                continue
+            # if not isMarketOpen():
+            #     self.waitForMarketOpen()
+            #     continue
 
             # Connect
             if not self.connect():
@@ -242,23 +258,23 @@ class TwelveDataManager:
             try:
                 logger.info("Connected. Starting data polling...")
 
-                while (
+                should_continue = (
                     self.is_running
-                    and isMarketOpen()
+                    # and isMarketOpen()
                     and not self.shutdown_event.is_set()
-                ):
+                )
+
+                while should_continue:
                     # Fetch latest data
                     self.fetchData()
 
                     # Wait for next polling interval
-                    for _ in range(POLLING_INTERVAL):
+                    time_waited = 0
+                    while time_waited < POLLING_INTERVAL:
                         if self.shutdown_event.is_set() or not isMarketOpen():
                             break
                         time.sleep(1)
-
-            except KeyboardInterrupt:
-                logger.info("Keyboard interrupt received")
-                break
+                        time_waited += 1
 
             except Exception as e:
                 logger.error(f"Error in polling loop: {e}")
@@ -303,6 +319,24 @@ class TwelveDataManager:
             if self.shutdown_event.is_set():
                 return
             time.sleep(1)
+
+    def waitForMarketOpen(self) -> None:
+        """
+        Wait for market to open with shutdown responsiveness
+
+        This method handles the waiting period when market is closed,
+        allowing the application to respond to shutdown signals.
+        """
+        wait_time = getTimeUntilMarketOpen()
+        hours = wait_time // 3600
+        minutes = (wait_time % 3600) // 60
+        logger.info(f"Market closed. Next open in {hours}h {minutes}m")
+
+        # Sleep in chunks to respond to shutdown
+        for _ in range(0, wait_time, 10):
+            if self.shutdown_event.is_set():
+                return
+            time.sleep(min(10, wait_time))
 
     def stop(self) -> None:
         """Stop data fetching gracefully"""

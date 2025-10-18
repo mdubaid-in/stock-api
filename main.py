@@ -122,12 +122,8 @@ def main():
     data_manager = DataManager(instrumentManager, shutdown_event)
 
     # Start health check thread
-    health_thread = Thread(target=healthCheck, args=(data_manager,), daemon=True)
-    health_thread.start()
-
-    # Start API key validation thread
-    validation_thread = Thread(target=apiKeyValidationJob, daemon=True)
-    validation_thread.start()
+    # health_thread = Thread(target=healthCheck, args=(data_manager,), daemon=True)
+    # health_thread.start()
 
     # Start data fetching (will wait for market hours internally)
     data_thread = Thread(target=data_manager.run, daemon=True)
