@@ -5,7 +5,7 @@ Manages real-time data fetching for Indian stocks using Twelve Data API
 
 import time
 from threading import Event, Lock
-from typing import Any, List, Optional, Dict
+from typing import Any, Optional, Dict
 from datetime import datetime
 from collections import deque
 
@@ -25,7 +25,7 @@ from log.logging import logger
 # Pro Plan: 800 API credits per minute
 # Grow Plan: 55 API credits per minute
 # Can be configured based on your plan
-RATE_LIMIT_PER_MINUTE = 55  # Grow plan limit
+RATE_LIMIT_PER_MINUTE = 54  # Grow plan limit
 POLLING_INTERVAL = 60  # 1 minute
 
 # Health check configuration
@@ -48,31 +48,34 @@ class RateLimiter:
 
     def acquire(self) -> None:
         """
-        Acquire permission to make an API call
-        Blocks if rate limit would be exceeded
+        Acquire permission to make an API call.
+        Ensures exactly `per_minute` calls per 60-second rolling window.
+        If limit reached, sleeps until the oldest call exits the window.
         """
         with self.lock:
             now = time.time()
 
-            # Clean up old entries (older than 60 seconds)
-            while self.minute_calls and now - self.minute_calls[0] >= 60.0:
+            # Clean out calls older than 60 seconds
+            while self.minute_calls and now - self.minute_calls[0] >= 60:
                 self.minute_calls.popleft()
 
-            # Check per-minute limit
+            # If we've hit the limit, wait until the earliest call expires
             if len(self.minute_calls) >= self.per_minute:
-                sleep_time = 60.0 - (now - self.minute_calls[0])
+                oldest = self.minute_calls[0]
+                sleep_time = 60 - (now - oldest)
                 if sleep_time > 0:
                     logger.debug(
-                        f"⏱️ Rate limit (per minute): sleeping {sleep_time:.2f}s"
+                        f"⏱️ Rate limit reached ({self.per_minute}/min). Sleeping {sleep_time:.2f}s..."
                     )
                     time.sleep(sleep_time)
-                    now = time.time()
-                    # Clean up again after sleeping
-                    while self.minute_calls and now - self.minute_calls[0] >= 60.0:
-                        self.minute_calls.popleft()
+
+                # After sleeping, clean again and update 'now'
+                now = time.time()
+                while self.minute_calls and now - self.minute_calls[0] >= 60:
+                    self.minute_calls.popleft()
 
             # Record this call
-            self.minute_calls.append(now)
+            self.minute_calls.append(time.time())
 
 
 class TwelveDataManager:
@@ -113,7 +116,7 @@ class TwelveDataManager:
                     if result:
                         self.processQuoteData(result, stock_data)
 
-                    time.sleep(0.2)
+                    time.sleep(0.5)
                 except Exception as e:
                     logger.error(f"Error fetching {symbol}: {e}")
 
@@ -140,8 +143,8 @@ class TwelveDataManager:
                 "createdAt": getCurrentTimeIST().replace(
                     hour=0, minute=0, second=0, microsecond=0
                 ),
-                "nse_data": None,
-                "bse_data": None,
+                "nse_data": {},
+                "bse_data": {},
             }
             for instrument in self.instrumentManager.instruments.values()
         }
@@ -194,8 +197,6 @@ class TwelveDataManager:
             else:
                 logger.error(f"Invalid exchange: {exchange}")
                 return None
-
-            print(stock_data[company_id])
 
         except Exception as e:
             logger.error(f"Error processing quote data: {e}")

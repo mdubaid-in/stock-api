@@ -1,10 +1,11 @@
+from turtle import update
 from typing import List, Dict
 from db.mongoClient import stock_mongo_client
 from log.logging import logger
 from pymongo import UpdateOne
 
 
-def save_stock_data(stock_data: List[Dict], batch_size: int = 1000):
+def save_stock_data(stock_data: List[Dict]):
     """Process in chunks for very large datasets"""
 
     # Filter valid stocks upfront
@@ -19,48 +20,40 @@ def save_stock_data(stock_data: List[Dict], batch_size: int = 1000):
         return True
 
     try:
-        stocks = stock_mongo_client.get_collection("stocks")
+        collection = stock_mongo_client.get_collection("stocks")
         total_upserted = 0
         total_modified = 0
+        bulk_operations = []
 
         # Process in chunks
-        for i in range(0, len(valid_stocks), batch_size):
-            chunk = valid_stocks[i : i + batch_size]
-            bulk_operations = []
+        for stock in valid_stocks:
+            _id = stock["_id"]
+            update_doc = {}
+            set_fields = {}
+            add_to_set_fields = {}
 
-            for stock in chunk:
-                # ... same logic as above ...
-                _id = stock["_id"]
-                update_doc = {}
-                set_fields = {}
-                addtoset_fields = {}
+            for key, value in stock.items():
+                if key == "_id":
+                    continue
+                elif key not in ("nse_data", "bse_data"):
+                    set_fields[key] = value
+                elif value:
+                    add_to_set_fields[key] = value
 
-                for key, value in stock.items():
-                    if key == "_id":
-                        continue
-                    elif key == "nse_data" and value:
-                        addtoset_fields["nse_data"] = value
-                    elif key == "bse_data" and value:
-                        addtoset_fields["bse_data"] = value
-                    else:
-                        set_fields[key] = value
+            if add_to_set_fields:
+                update_doc["$addToSet"] = add_to_set_fields
 
-                if set_fields:
-                    set_fields["_id"] = _id
-                    update_doc["$set"] = set_fields
-                else:
-                    update_doc["$set"] = {"_id": _id}
+            if set_fields:
+                update_doc["$setOnInsert"] = set_fields
 
-                if addtoset_fields:
-                    update_doc["$addToSet"] = addtoset_fields
+            bulk_operations.append(UpdateOne({"_id": _id}, update_doc, upsert=True))
 
-                bulk_operations.append(UpdateOne({"_id": _id}, update_doc, upsert=True))
-
-            result = stocks.bulk_write(bulk_operations, ordered=False)
+        if bulk_operations:
+            result = collection.bulk_write(bulk_operations, ordered=False)
             total_upserted += result.upserted_count
             total_modified += result.modified_count
 
-        logger.debug(f"Total: {total_upserted} inserted, {total_modified} modified")
+        logger.note(f"Total: {total_upserted} inserted, {total_modified} modified")
 
     except Exception as e:
         logger.error(f"Error saving stock data: {e}")
