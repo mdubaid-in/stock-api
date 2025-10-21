@@ -41,7 +41,7 @@ def save_stock_data(stock_data: List[Dict]):
                     add_to_set_fields[key] = value
 
             if add_to_set_fields:
-                update_doc["$addToSet"] = add_to_set_fields
+                update_doc["$push"] = add_to_set_fields
 
             if set_fields:
                 update_doc["$setOnInsert"] = set_fields

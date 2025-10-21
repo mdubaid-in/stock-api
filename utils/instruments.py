@@ -36,7 +36,7 @@ class InstrumentManager:
     """Manages instruments and provides utility methods"""
 
     def __init__(self):
-        self.instruments: Dict[str, Instrument] = {}
+        self.instruments: Dict[str, List[Instrument]] = {}
 
     def addInstrument(
         self,
@@ -55,7 +55,9 @@ class InstrumentManager:
             company_id: Company ID
         """
         instrument = Instrument(symbol, exchange, name, company_id)
-        self.instruments[company_id] = instrument
+        if symbol not in self.instruments:
+            self.instruments[symbol] = []
+        self.instruments[symbol].append(instrument)
 
     def getSymbolsList(self) -> List[str]:
         """
@@ -66,20 +68,12 @@ class InstrumentManager:
         """
         return [
             instrument.getSymbolWithExchange()
-            for instrument in self.instruments.values()
+            for instruments in self.instruments.values()
+            for instrument in instruments
         ]
 
-    def get_instrument(self, symbol: str) -> Optional[Instrument]:
-        """
-        Get instrument by symbol
-
-        Args:
-            symbol: Symbol to search for
-
-        Returns:
-            Instrument if found, None otherwise
-        """
-        return self.instruments.get(symbol, None)
+    def get_instrument(self, symbol: str) -> List[Instrument]:
+        return self.instruments.get(symbol, [])
 
     def clear(self) -> None:
         """Clear all instruments"""
@@ -116,7 +110,9 @@ def fetchInstrumentsFromMongo() -> List[Dict]:
         return []
 
 
-def createInstrumentsForBothExchanges(mongoInstrument: Dict) -> List[Instrument]:
+def createInstrumentsForBothExchanges(
+    mongoInstrument: Dict,
+) -> Dict[str, List[Instrument]]:
     """
     Create Instrument objects from the instruments array in MongoDB document
 
@@ -124,9 +120,9 @@ def createInstrumentsForBothExchanges(mongoInstrument: Dict) -> List[Instrument]
         mongoInstrument: Instrument document from MongoDB with instruments array
 
     Returns:
-        List of Instrument objects from the instruments array
+        Dict of Instrument objects from the instruments array
     """
-    instruments: Dict[str, Instrument] = {}
+    instruments: Dict[str, List[Instrument]] = {}
 
     # Get instruments array from the document
     company_id = mongoInstrument.get("_id", "")
@@ -140,7 +136,11 @@ def createInstrumentsForBothExchanges(mongoInstrument: Dict) -> List[Instrument]
             name = instrument_data.get("name", "")
 
             if symbol:
-                instruments[symbol] = Instrument(symbol, exchange, name, company_id)
+                if symbol not in instruments:
+                    instruments[symbol] = []
+                instruments[symbol].append(
+                    Instrument(symbol, exchange, name, company_id)
+                )
     else:
         # If no crossListings found, log a warning
         logger.warning(

@@ -26,7 +26,7 @@ from log.logging import logger
 # Grow Plan: 55 API credits per minute
 # Can be configured based on your plan
 RATE_LIMIT_PER_MINUTE = 54  # Grow plan limit
-POLLING_INTERVAL = 60  # 1 minute
+POLLING_INTERVAL = 300  # 5 minutes
 
 # Health check configuration
 HEALTH_CHECK_INTERVAL = 60  # seconds
@@ -146,7 +146,8 @@ class TwelveDataManager:
                 "nse_data": {},
                 "bse_data": {},
             }
-            for instrument in self.instrumentManager.instruments.values()
+            for instrument_list in self.instrumentManager.instruments.values()
+            for instrument in instrument_list
         }
 
     def processQuoteData(self, data: Dict, stock_data: Dict[str, Any]) -> None:
@@ -163,11 +164,13 @@ class TwelveDataManager:
                 logger.error("Symbol not found in data")
                 return None
 
-            instrument = self.instrumentManager.get_instrument(symbol)
-            if not instrument:
+            instruments = self.instrumentManager.get_instrument(symbol)
+            if not instruments:
                 logger.error(f"Instrument not found for symbol: {symbol}")
                 return None
 
+            # Get the first instrument (assuming they all have the same company_id)
+            instrument = instruments[0]
             company_id = instrument.company_id
             stock = stock_data.get(company_id, None)
             if not stock:
